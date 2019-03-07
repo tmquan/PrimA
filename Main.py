@@ -93,6 +93,9 @@ class ImageDataFlow(RNGDataFlow):
             rand_index = self.rng.randint(0, len(self.imageFiles))
             image_p = cv2.imread(self.imageFiles[rand_index], cv2.IMREAD_GRAYSCALE)
             label_p = cv2.imread(self.labelFiles[rand_index], cv2.IMREAD_GRAYSCALE)
+
+            image_p = cv2.resize(image_p, (int(image_p.shape[0]/2), int(image_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            label_p = cv2.resize(label_p, (int(label_p.shape[0]/2), int(label_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
             # image_p = np.expand_dims(image_p, axis=-1)
             # label_p = np.expand_dims(label_p, axis=-1)
             # image_p = np.expand_dims(image_p, axis=0)
@@ -145,12 +148,17 @@ class Model(ModelDesc):
 
     def build_graph(self, image, label):
         NF = 64
+        logit = label / 20.0 # 0~10
         image = (image / 128.0) - 1.0
         label = (label / 128.0) - 1.0
+
         image = tf.expand_dims(image, axis=-1)
+        # logit = tf.expand_dims(logit, axis=-1)
         label = tf.expand_dims(label, axis=-1)
+        
+        # Network definition
         with argscope(Conv2D, kernel_shape=4, stride=2,
-                                    nl=lambda x, name: tf.nn.leaky_relu(BatchNorm('bn', x), name=name)):
+                      nl=lambda x, name: tf.nn.leaky_relu(BatchNorm('bn', x), name=name)):
             # encoder
             e1 = Conv2D('conv1', image, NF, nl=tf.nn.leaky_relu)
             e2 = Conv2D('conv2', e1, NF * 2)
@@ -190,15 +198,28 @@ class Model(ModelDesc):
             e2 = Dropout(e2)
             e2 = tf.concat([e2, e1], axis=3)
 
-            estim = Deconv2D('estim', e2, 1, nl=tf.tanh)
+            estim = Deconv2D('estim', e2, 11, nl=tf.nn.sigmoid)
 
-        # self.cost = 0
-        cost = tf.reduce_mean(tf.abs(estim - label, name="mae"))
-        add_moving_summary(cost)
+        # Loss define here
+        sfm = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=estim, labels=tf.to_int32(logit)), name='sfm')
+        add_moving_summary(sfm)
 
+        estim = tf.argmax(estim, axis=-1)
+        estim = tf.expand_dims(estim, axis=-1)
+        estim = tf.to_float(estim)
+        estim = estim * 20
+        estim = (estim / 128.0) - 1.0
+        mae = tf.reduce_mean(tf.abs(estim - label, name="mae"))
+        add_moving_summary(mae)
+
+        cost = sfm + mae
+        add_moving_summary(cost)        
+        
+        # Visualization here
         viz = tf.concat([image, estim, label], axis=2)
         viz = (viz + 1.0) * 128.0
         tf.summary.image('colorized', viz, max_outputs=10)
+
         return cost
 
 class OnlineExport(Callback):
@@ -259,7 +280,7 @@ if __name__ == '__main__':
         train_dset = AugmentImageComponents(train_dset, augs, (0, 1)) # Random crop both channel
         # train_dset  = PrefetchDataZMQ(train_dset, 4)
         train_dset = BatchData(train_dset, 32)
-        train_dset = PrefetchData(train_dset, nr_proc=4, nr_prefetch=32) # use queue size 4
+        train_dset = PrefetchData(train_dset, nr_proc=2, nr_prefetch=50)
         train_dset  = PrintData(train_dset)
 
         # Set the logger directory
