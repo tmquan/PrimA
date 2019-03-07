@@ -20,8 +20,13 @@ class ImageDataFlow(RNGDataFlow):
 	pass
 
 class Model(ModelDesc):
-	pass
-	
+	def inputs(self):
+        return [tf.placeholder(tf.float32, (None, args.dimy, args.dimx, 3), 'image'),
+                tf.placeholder(tf.float32, (None, args.dimy, args.dimx, 1), 'label')]
+
+    def build_graph(self, image, label):
+        self.cost = 0
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 
