@@ -82,6 +82,18 @@ class ImageDataFlow(RNGDataFlow):
         self.DIMY = shape[1]
         self.DIMX = shape[2]
 
+        self.images = []
+        self.labels = []
+
+        for imageFile in self.imageFiles:
+            image = cv2.imread(imageFile, cv2.IMREAD_GRAYSCALE)
+            image = cv2.resize(image, (int(image.shape[0]/2), int(image.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            self.images.append(image)
+        for labelFile in self.labelFiles:
+            label = cv2.imread(labelFile, cv2.IMREAD_GRAYSCALE)
+            label = cv2.resize(label, (int(label.shape[0]/2), int(label.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            self.labels.append(label)
+
     def size(self):
         return self._size
 
@@ -91,11 +103,13 @@ class ImageDataFlow(RNGDataFlow):
             # Pick randomly a tuple of training instance
             #
             rand_index = self.rng.randint(0, len(self.imageFiles))
-            image_p = cv2.imread(self.imageFiles[rand_index], cv2.IMREAD_GRAYSCALE)
-            label_p = cv2.imread(self.labelFiles[rand_index], cv2.IMREAD_GRAYSCALE)
+            # image_p = cv2.imread(self.imageFiles[rand_index], cv2.IMREAD_GRAYSCALE)
+            # label_p = cv2.imread(self.labelFiles[rand_index], cv2.IMREAD_GRAYSCALE)
+            image_p = self.images[rand_index].copy()
+            label_p = self.labels[rand_index].copy()
 
-            image_p = cv2.resize(image_p, (int(image_p.shape[0]/2), int(image_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
-            label_p = cv2.resize(label_p, (int(label_p.shape[0]/2), int(label_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            # image_p = cv2.resize(image_p, (int(image_p.shape[0]/2), int(image_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            # label_p = cv2.resize(label_p, (int(label_p.shape[0]/2), int(label_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
             # image_p = np.expand_dims(image_p, axis=-1)
             # label_p = np.expand_dims(label_p, axis=-1)
             # image_p = np.expand_dims(image_p, axis=0)
@@ -188,8 +202,8 @@ def residual_dec(x, chan, first=False, kernel_shape=3):
     with argscope([Conv2D, Deconv2D], nl=INLReLU, stride=1, kernel_shape=kernel_shape):
         x  = Deconv2D('dec_i', x, chan, stride=1) 
         x  = residual('dec_r', x, chan, first=True)
-        x  = BilinearUpSample('upsample', x, 2)
-        # x = Deconv2D('dec_o', x, chan, stride=2, activation=tf.identity) 
+        # x  = BilinearUpSample('upsample', x, 2)
+        x = Deconv2D('dec_o', x, chan, stride=2, activation=tf.identity) 
         # x1 = Deconv2D('dec_o', x, chan, stride=2, activation=tf.identity) 
         # x2 = BilinearUpSample('upsample', x, 2)
         # x  = InstanceNorm('dec_n', (x1+x2)/2.0)
@@ -201,13 +215,13 @@ def arch_fusionnet_encoder_2d(img, feats=[None, None, None], last_dim=1, nl=INLR
     with argscope([Conv2D], nl=INLReLU, kernel_shape=3, stride=2, padding='VALID'):
         with argscope([Deconv2D], nl=INLReLU, kernel_shape=3, stride=2, padding='SAME'):
             e0 = residual_enc('e0', img, nb_filters*1)
-            # e0 = Dropout('f0', e0, 0.5)
+            e0 = Dropout('f0', e0, 0.5)
             e1 = residual_enc('e1',  e0, nb_filters*2)
-            # e1 = Dropout('f1', e1, 0.5)
+            e1 = Dropout('f1', e1, 0.5)
             e2 = residual_enc('e2',  e1, nb_filters*4)
-            # e2 = Dropout('f2', e2, 0.5)
+            e2 = Dropout('f2', e2, 0.5)
             e3 = residual_enc('e3',  e2, nb_filters*8)
-            # e3 = Dropout('f3', e3, 0.5)
+            e3 = Dropout('f3', e3, 0.5)
             return e3, [e2, e1, e0]
            
 
@@ -216,22 +230,22 @@ def arch_fusionnet_decoder_2d(img, feats=[None, None, None], last_dim=1, nl=INLR
         with argscope([Deconv2D], nl=INLReLU, kernel_shape=3, stride=2, padding='SAME'):
             e2, e1, e0 = feats 
             d4 = img 
-            # d4 = Dropout('r4', d4, 0.5)
+            d4 = Dropout('r4', d4, 0.5)
 
             d3 = residual_dec('d3', d4, nb_filters*4)
-            # d3 = Dropout('r3', d3, 0.5)
+            d3 = Dropout('r3', d3, 0.5)
             d3 = d3+e2 if e2 is not None else d3 
             
             d2 = residual_dec('d2', d3, nb_filters*2)
-            # d2 = Dropout('r2', d2, 0.5)
+            d2 = Dropout('r2', d2, 0.5)
             d2 = d2+e1 if e1 is not None else d2 
             
             d1 = residual_dec('d1', d2, nb_filters*1)
-            # d1 = Dropout('r1', d1, 0.5)
+            d1 = Dropout('r1', d1, 0.5)
             d1 = d1+e0 if e0 is not None else d1  
             
             d0 = residual_dec('d0', d1, nb_filters*1) 
-            # d0 = Dropout('r0', d0, 0.5)
+            d0 = Dropout('r0', d0, 0.5)
             
             dp = tf.pad( d0, name='pad_o', mode='REFLECT', paddings=[[0,0], 
                                                                      [7//2,7//2], 

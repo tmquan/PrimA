@@ -82,6 +82,18 @@ class ImageDataFlow(RNGDataFlow):
         self.DIMY = shape[1]
         self.DIMX = shape[2]
 
+        self.images = []
+        self.labels = []
+
+        for imageFile in self.imageFiles:
+            image = cv2.imread(imageFile, cv2.IMREAD_GRAYSCALE)
+            image = cv2.resize(image, (int(image.shape[0]/2), int(image.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            self.images.append(image)
+        for labelFile in self.labelFiles:
+            label = cv2.imread(labelFile, cv2.IMREAD_GRAYSCALE)
+            label = cv2.resize(label, (int(label.shape[0]/2), int(label.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            self.labels.append(label)
+
     def size(self):
         return self._size
 
@@ -91,11 +103,13 @@ class ImageDataFlow(RNGDataFlow):
             # Pick randomly a tuple of training instance
             #
             rand_index = self.rng.randint(0, len(self.imageFiles))
-            image_p = cv2.imread(self.imageFiles[rand_index], cv2.IMREAD_GRAYSCALE)
-            label_p = cv2.imread(self.labelFiles[rand_index], cv2.IMREAD_GRAYSCALE)
+            # image_p = cv2.imread(self.imageFiles[rand_index], cv2.IMREAD_GRAYSCALE)
+            # label_p = cv2.imread(self.labelFiles[rand_index], cv2.IMREAD_GRAYSCALE)
+            image_p = self.images[rand_index].copy()
+            label_p = self.labels[rand_index].copy()
 
-            image_p = cv2.resize(image_p, (int(image_p.shape[0]/2), int(image_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
-            label_p = cv2.resize(label_p, (int(label_p.shape[0]/2), int(label_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            # image_p = cv2.resize(image_p, (int(image_p.shape[0]/2), int(image_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            # label_p = cv2.resize(label_p, (int(label_p.shape[0]/2), int(label_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
             # image_p = np.expand_dims(image_p, axis=-1)
             # label_p = np.expand_dims(label_p, axis=-1)
             # image_p = np.expand_dims(image_p, axis=0)
