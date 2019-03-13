@@ -108,14 +108,36 @@ class ImageDataFlow(RNGDataFlow):
             image_p = self.images[rand_index].copy()
             label_p = self.labels[rand_index].copy()
 
+            while (image_p.shape[0] <= 512 or image_p.shape[1] <= 512) or \
+                (label_p.shape[0] <= 512 or label_p.shape[1] <= 512) or \
+                image_p is None or label_p is None:
+                rand_index = self.rng.randint(0, len(self.imageFiles))
+                image_p = self.images[rand_index].copy()
+                label_p = self.labels[rand_index].copy()
+
+            if self.isTrain:
+                dimy, dimx = image_p.shape
+                
+                randy = self.rng.randint(0, dimy-512+1)
+                randx = self.rng.randint(0, dimx-512+1)
+                image_p = image_p[randy:randy+512,randx:randx+512]
+                label_p = label_p[randy:randy+512,randx:randx+512]
+
+                image_p = cv2.resize(image_p, (512, 512), cv2.INTER_NEAREST)
+                label_p = cv2.resize(label_p, (512, 512), cv2.INTER_NEAREST)
+            # while (image_p.shape[0] <= 512 or image_p.shape[1] <= 512) or \
+            #     (label_p.shape[0] <= 512 or label_p.shape[1] <= 512) or \
+            #     image_p is None or label_p is None:
+            #     rand_index = self.rng.randint(0, len(self.imageFiles))
+            #     image_p = self.images[rand_index].copy()
+            #     label_p = self.labels[rand_index].copy()
             # image_p = cv2.resize(image_p, (int(image_p.shape[0]/2), int(image_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
             # label_p = cv2.resize(label_p, (int(label_p.shape[0]/2), int(label_p.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
             # image_p = np.expand_dims(image_p, axis=-1)
             # label_p = np.expand_dims(label_p, axis=-1)
             # image_p = np.expand_dims(image_p, axis=0)
             # label_p = np.expand_dims(label_p, axis=0)                        
-            yield [image_p.astype(np.float32), label_p.astype(np.float32)] 
-
+                yield [image_p.astype(np.float32), label_p.astype(np.float32)] 
 
 def get_data(dataDir, isTrain=False, isValid=False, isTest=False, shape=[1, 512, 512]):
     # Process the directories 
@@ -411,8 +433,12 @@ if __name__ == '__main__':
         valid_dset = get_data(args.data, isTrain=False, isValid=True, isTest=False, shape=[args.dimz, args.dimy, args.dimx])
         # test_dset  = get_data(args.data, isTrain=False, isValid=False, isTest=True)
 
-        augs = [imgaug.RandomCrop(512)]
-        train_dset = AugmentImageComponents(train_dset, augs, (0, 1)) # Random crop both channel
+        # augs = [imgaug.RandomCrop((512, 512)), imgaug.Resize((512, 512), cv2.INTER_NEAREST), ]
+        # augs = [imgaug.GoogleNetRandomCropAndResize(crop_area_fraction=(0.00, 1.0), 
+        #    aspect_ratio_range=(0.9, 1.2), 
+        #    target_shape=512, interp=cv2.INTER_NEAREST)]
+        augs =[]
+        # train_dset = AugmentImageComponents(train_dset, augs, (0, 1)) # Random crop both channel
         # train_dset  = PrefetchDataZMQ(train_dset, 4)
         train_dset = BatchData(train_dset, 4)
         train_dset = PrefetchData(train_dset, nr_proc=2, nr_prefetch=50)
@@ -429,7 +455,7 @@ if __name__ == '__main__':
             model           =   model, 
             dataflow        =   train_dset,
             callbacks       =   [
-                PeriodicTrigger(ModelSaver(), every_k_epochs=200),
+                PeriodicTrigger(ModelSaver(), every_k_epochs=50),
                 # PeriodicTrigger(VisualizeRunner(valid_ds), every_k_epochs=5),
                 ScheduledHyperParamSetter('learning_rate', [(0, 2e-4), (100, 1e-4), (200, 2e-5), (300, 1e-5), (400, 2e-6), (500, 1e-6)], interp='linear'),
                 ],
