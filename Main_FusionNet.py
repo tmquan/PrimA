@@ -87,11 +87,11 @@ class ImageDataFlow(RNGDataFlow):
 
         for imageFile in self.imageFiles:
             image = cv2.imread(imageFile, cv2.IMREAD_GRAYSCALE)
-            image = cv2.resize(image, (int(image.shape[0]/2), int(image.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            image = image[::2, ::2]
             self.images.append(image)
         for labelFile in self.labelFiles:
             label = cv2.imread(labelFile, cv2.IMREAD_GRAYSCALE)
-            label = cv2.resize(label, (int(label.shape[0]/2), int(label.shape[1]/2)), interpolation=cv2.INTER_NEAREST)
+            label = label[::2, ::2]
             self.labels.append(label)
 
     def size(self):
@@ -173,7 +173,7 @@ def BNLReLU(x, name=None):
     x = BatchNorm('bn', x)
     return tf.nn.leaky_relu(x, name=name)
 
-	###############################################################################
+###############################################################################
 #                                   FusionNet 2D
 ###############################################################################
 @layer_register(log_shape=True)
@@ -366,6 +366,7 @@ class Model(ModelDesc):
         estim = tf.expand_dims(estim, axis=-1)
         estim = tf.cast(estim, tf.float32)
         estim = estim * 20
+        estim = tf.identity(estim, name='estim')
         estim = (estim / 128.0) - 1.0
         mae = tf.reduce_mean(tf.abs(estim - label), name='mae')
         add_moving_summary(mae)
@@ -390,8 +391,240 @@ class OnlineExport(Callback):
        pass
        
 
+'''
+MIT License
+Copyright (c) 2018 Fanjin Zeng
+This work is licensed under the terms of the MIT license, see <https://opensource.org/licenses/MIT>.  
+'''
+
+def sliding_window_view(x, shape, step=None, subok=False, writeable=False):
+    """
+    Create sliding window views of the N dimensions array with the given window
+    shape. Window slides across each dimension of `x` and provides subsets of `x`
+    at any window position.
+    Parameters
+    ----------
+    x : ndarray
+        Array to create sliding window views.
+    shape : sequence of int
+        The shape of the window. Must have same length as number of input array dimensions.
+    step: sequence of int, optional
+        The steps of window shifts for each dimension on input array at a time.
+        If given, must have same length as number of input array dimensions.
+        Defaults to 1 on all dimensions.
+    subok : bool, optional
+        If True, then sub-classes will be passed-through, otherwise the returned
+        array will be forced to be a base-class array (default).
+    writeable : bool, optional
+        If set to False, the returned array will always be readonly view.
+        Otherwise it will return writable copies(see Notes).
+    Returns
+    -------
+    view : ndarray
+        Sliding window views (or copies) of `x`. view.shape = (x.shape - shape) // step + 1
+    See also
+    --------
+    as_strided: Create a view into the array with the given shape and strides.
+    broadcast_to: broadcast an array to a given shape.
+    Notes
+    -----
+    ``sliding_window_view`` create sliding window views of the N dimensions array
+    with the given window shape and its implementation based on ``as_strided``.
+    Please note that if writeable set to False, the return is views, not copies
+    of array. In this case, write operations could be unpredictable, so the return
+    views is readonly. Bear in mind, return copies (writeable=True), could possibly
+    take memory multiple amount of origin array, due to overlapping windows.
+    For some cases, there may be more efficient approaches, such as FFT based algo discussed in #7753.
+    Examples
+    --------
+    >>> i, j = np.ogrid[:3,:4]
+    >>> x = 10*i + j
+    >>> shape = (2,2)
+    >>> sliding_window_view(x, shape)
+    array([[[[ 0,  1],
+             [10, 11]],
+            [[ 1,  2],
+             [11, 12]],
+            [[ 2,  3],
+             [12, 13]]],
+           [[[10, 11],
+             [20, 21]],
+            [[11, 12],
+             [21, 22]],
+            [[12, 13],
+             [22, 23]]]])
+    >>> i, j = np.ogrid[:3,:4]
+    >>> x = 10*i + j
+    >>> shape = (2,2)
+    >>> step = (1,2)
+    >>> sliding_window_view(x, shape, step)
+    array([[[[ 0,  1],
+             [10, 11]],
+            [[ 2,  3],
+             [12, 13]]],
+           [[[10, 11],
+             [20, 21]],
+            [[12, 13],
+             [22, 23]]]])
+    """
+    # first convert input to array, possibly keeping subclass
+    x = np.array(x, copy=False, subok=subok)
+
+    try:
+        shape = np.array(shape, np.int)
+    except:
+        raise TypeError('`shape` must be a sequence of integer')
+    else:
+        if shape.ndim > 1:
+            raise ValueError('`shape` must be one-dimensional sequence of integer')
+        if len(x.shape) != len(shape):
+            raise ValueError("`shape` length doesn't match with input array dimensions")
+        if np.any(shape <= 0):
+            raise ValueError('`shape` cannot contain non-positive value')
+
+    if step is None:
+        step = np.ones(len(x.shape), np.intp)
+    else:
+        try:
+            step = np.array(step, np.intp)
+        except:
+            raise TypeError('`step` must be a sequence of integer')
+        else:
+            if step.ndim > 1:
+                raise ValueError('`step` must be one-dimensional sequence of integer')
+            if len(x.shape)!= len(step):
+                raise ValueError("`step` length doesn't match with input array dimensions")
+            if np.any(step <= 0):
+                raise ValueError('`step` cannot contain non-positive value')
+
+    o = (np.array(x.shape)  - shape) // step + 1 # output shape
+    if np.any(o <= 0):
+        raise ValueError('window shape cannot larger than input array shape')
+
+    strides = x.strides
+    view_strides = strides * step
+
+    view_shape = np.concatenate((o, shape), axis=0)
+    view_strides = np.concatenate((view_strides, strides), axis=0)
+    #view = np.lib.stride_tricks.as_strided(x, view_shape, view_strides, subok=subok, writeable=writeable)
+    view = np.lib.stride_tricks.as_strided(x, view_shape, view_strides, subok=subok)#, writeable=writeable)
+
+    if writeable:
+        return view.copy()
+    else:
+        return view
+
 def sample(dataDir, model_path):
-    pass
+    print("Starting...")
+    print(dataDir)
+    imageFiles = glob.glob(os.path.join(dataDir, '*.png'))
+    print(imageFiles)
+
+    # Load the model 
+    predict_func = OfflinePredictor(PredictConfig(
+        model=Model(),
+        session_init=get_model_loader(model_path),
+        input_names=['image'],
+        output_names=['mul:0']))
+
+    for imageFile in imageFiles:
+        head, tail = os.path.split(imageFile)
+        print(tail)
+        estimFile = tail
+        print(estimFile)
+
+        # Read the image file
+        # image = skimage.io.imread(imageFile)
+        image = cv2.imread(imageFile, cv2.IMREAD_GRAYSCALE)
+        image = image[::2, ::2]
+        
+        def getOptimalDeploySize(image, fov):
+            old_shape = image.shape[:2]
+            new_shape = (int(np.ceil(old_shape[0]/fov)*fov), 
+                         int(np.ceil(old_shape[1]/fov)*fov))
+            resized = cv2.resize(image, new_shape[::-1]) # x then y
+            print(old_shape, new_shape)
+            print(image.shape)
+            return image, old_shape, resized, new_shape
+
+        _, old_shape, image, new_shape = getOptimalDeploySize(image, 256)
+
+        
+        image = np.expand_dims(image, axis=-1)
+        image = np.expand_dims(image, axis=0)
+        print(image.shape)
+
+        def weighted_map_blocks(arr, inner, outer, ghost, func=None): # work for 3D, inner=[1, 3, 3], ghost=[0, 2, 2], 
+            dtype = np.float32 #arr.dtype
+
+            arr = arr.astype(np.float32)
+            # param
+            if outer==None:
+                outer = inner + 2*ghost
+                outer = [(i + 2*g) for i, g in zip(inner, ghost)]
+            shape = outer
+            steps = inner
+                
+            print(outer)
+            print(shape)
+            print(inner)
+            
+            padding=arr.copy()
+            print(padding.shape)
+            #print(padding)
+            
+            weights = np.zeros_like(padding)
+            results = np.zeros_like(padding)
+            
+            v_padding = sliding_window_view(padding, shape, steps)
+            v_weights = sliding_window_view(weights, shape, steps)
+            v_results = sliding_window_view(results, shape, steps)
+            
+            print('v_padding', v_padding.shape)
+
+
+            #for z in range(v_padding.shape[0]):
+            for y in range(v_padding.shape[1]):
+                for x in range(v_padding.shape[2]):
+    
+                    v_result = np.array(func(
+                                            (v_padding[0,y,x,0][...,0]) ) ) ### Todo function is here
+                    v_result = np.squeeze(v_result, axis=0).astype(np.float32)
+    
+                    yy, xx = np.meshgrid(np.linspace(-1,1,shape[1], dtype=np.float32), 
+                                         np.linspace(-1,1,shape[2], dtype=np.float32))
+                    d = np.sqrt(xx*xx+yy*yy)
+                    sigma, mu = 0.5, 0.0
+                    v_weight = 1e-6+np.exp(-( (d-mu)**2 / ( 2.0 * sigma**2 ) ) )
+                    v_weight = v_weight/v_weight.max()
+                    #print(v_weight.shape)
+                    #v_weight.tofile('gaussian_map.npy')
+                    
+                    v_weight = np.expand_dims(v_weight, axis=-1)
+                    #print(shape)
+                    #print(v_weight.shape)
+                    v_weights[0,y,x] += v_weight
+
+                    v_results[0,y,x] += v_result * v_weight
+                        
+            # Divided by the weight param
+            results /= weights 
+            
+            
+            return results.astype(dtype)
+    
+        if image.shape != [1, 512, 512, 1]:
+            # Clean
+            estim = weighted_map_blocks(image, inner=[1, 256, 256, 1], 
+                                               outer=[1, 512, 512, 1], 
+                                               ghost=[1, 256, 256, 0], 
+                                               func=predict_func) # inner,  ghost
+
+        estim = np.squeeze(estim)
+        # Resize to old shape
+        estim = cv2.resize(estim, old_shape[::-1], cv2.INTER_NEAREST)
+        cv2.imwrite(estimFile, estim)
+    return None
 
 
 if __name__ == '__main__':
@@ -425,6 +658,7 @@ if __name__ == '__main__':
     if args.sample:
         # TODO
         print("Deploy the data")
+        sample(args.data, args.load)
         pass
 
     else:
@@ -437,7 +671,7 @@ if __name__ == '__main__':
         # augs = [imgaug.GoogleNetRandomCropAndResize(crop_area_fraction=(0.00, 1.0), 
         #    aspect_ratio_range=(0.9, 1.2), 
         #    target_shape=512, interp=cv2.INTER_NEAREST)]
-        augs =[]
+        augs = []
         # train_dset = AugmentImageComponents(train_dset, augs, (0, 1)) # Random crop both channel
         # train_dset  = PrefetchDataZMQ(train_dset, 4)
         train_dset = BatchData(train_dset, 4)
